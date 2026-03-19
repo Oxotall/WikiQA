@@ -1,0 +1,19 @@
+# Example configuration for src/retrieval/build_hnsw.py
+dataset_path: omarkamali/wikipedia-monthly
+dataset_name: latest.en             # local HF dataset directory or hub ID
+split: 1000 #train
+output_dir: data/index/wiki_hnsw    # where index.bin, metadata.jsonl, manifest.json are written
+
+# Embedding model
+model: google/embeddinggemma-300m
+batch_size: 16
+
+# HNSW parameters
+max_elements: null                  # optional upper bound; null lets the script auto-resize
+ef_construction: 200
+m: 16
+ef_search: 64
+num_threads: 8
+
+# Metadata output
+metadata_filename: metadata.jsonl
