@@ -10,46 +10,23 @@ Run:
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping
 
 import hnswlib
+import json
 import numpy as np
-import yaml
 from flask import Flask, render_template, request
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
+from src.api.tools import load_yaml_or_json, read_access_token
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG = Path(os.environ.get("RAG_CONFIG", "configs/serve.yaml"))
-
-
-# ------------------------- Config -------------------------
-
-def load_yaml_or_json(path: Path) -> Mapping[str, Any]:
-    if not path.exists():
-        raise FileNotFoundError(path)
-    if path.suffix.lower() in {".yaml", ".yml"}:
-        return yaml.safe_load(path.read_text())
-    return json.loads(path.read_text())
-
-
-def read_access_token(path: str | None) -> str | None:
-    if not path:
-        return None
-    p = Path(path)
-    if not p.exists():
-        return None
-    data = yaml.safe_load(p.read_text())
-    if isinstance(data, dict):
-        token = data.get("access_token")
-        if token:
-            return str(token).strip()
-    return None
 
 
 @dataclass
