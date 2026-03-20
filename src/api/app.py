@@ -22,7 +22,7 @@ from flask import Flask, render_template, request
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
-from src.api.tools import load_yaml_or_json, read_access_token
+from src.retrieval.tools import load_yaml, read_access_token
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -40,7 +40,7 @@ class ServiceConfig:
 
     @classmethod
     def from_file(cls, path: Path) -> "ServiceConfig":
-        cfg = load_yaml_or_json(path)
+        cfg = load_yaml(path)
         return cls(
             index_dir=Path(cfg["index_dir"]),
             encoder_model=cfg.get("encoder_model"),

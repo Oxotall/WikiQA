@@ -23,7 +23,7 @@ from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
 
-from tools import load_yaml_or_json, read_access_token
+from tools import load_yaml, read_access_token
 
 
 # ---------------------- Config ----------------------
@@ -46,7 +46,7 @@ class BuildConfig:
 
     @classmethod
     def from_file(cls, path: Path) -> "BuildConfig":
-        raw = load_yaml_or_json(path)
+        raw = load_yaml(path)
         required = [
             "dataset_path",
             "dataset_name",

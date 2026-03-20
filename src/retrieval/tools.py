@@ -10,13 +10,9 @@ from typing import Any, List, Mapping
 import yaml
 
 
-def load_yaml_or_json(path: Path) -> Mapping[str, Any]:
+def load_yaml(path: Path) -> Mapping[str, Any]:
     """Load a YAML or JSON file into a dict."""
-    if not path.exists():
-        raise FileNotFoundError(path)
-    if path.suffix.lower() in {".yaml", ".yml"}:
-        return yaml.safe_load(path.read_text())
-    return json.loads(path.read_text())
+    return yaml.safe_load(path.read_text())
 
 
 def read_access_token(path: str | None) -> str | None:
