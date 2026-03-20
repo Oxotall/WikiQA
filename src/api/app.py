@@ -76,13 +76,13 @@ class RagIndex:
 
     def search(self, query: str, k: int) -> List[Dict[str, Any]]:
         vec = self.encoder.encode_query([query], convert_to_numpy=True, normalize_embeddings=False)[0]
-        labels, scores = self.index.knn_query(vec, k=k)
+        labels, distances = self.index.knn_query(vec, k=k)
         rows = []
-        for idx, score in zip(labels[0], scores[0]):
+        for idx, dist in zip(labels[0], distances[0]):
             meta = self.metadata[idx]
             rows.append(
                 {
-                    "score": score,
+                    "score": 1 - dist,
                     "title": meta.get("title", ""),
                     "url": meta.get("url", ""),
                     "paragraph": self.paragraphs[idx],
