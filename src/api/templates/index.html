@@ -2,30 +2,103 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>RAG Search</title>
+  <title>Wiki Search</title>
   <style>
-    body { font-family: sans-serif; margin: 2rem; max-width: 960px; }
-    textarea { width: 100%; height: 90px; }
-    .para { border-left: 4px solid #ddd; padding-left: 0.75rem; margin: 0.5rem 0; }
-    .score { color: #888; font-size: 0.9em; }
+    :root {
+      --teal: #009D91;
+      --blue: #1144AA;
+      --amber: #FFA700;
+      --bg: #f7f9fb;
+      --card: #ffffff;
+    }
+    body {
+      font-family: "Inter", "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background: linear-gradient(135deg, rgba(85, 114, 111, 0.08), rgba(17,68,170,0.08));
+      color: #123;
+      display: flex;
+      justify-content: center;
+    }
+    .shell {
+      width: min(1100px, 100%);
+      background: var(--card);
+      box-shadow: 0 12px 40px rgba(17,68,170,0.15);
+      border-radius: 16px;
+      padding: 24px 28px 32px;
+      border: 1px solid rgba(0,157,145,0.15);
+    }
+    h2 { color: var(--blue); margin-top: 0; }
+    form { margin-bottom: 20px; }
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 12px;
+      border: 1px solid rgba(17,68,170,0.25);
+      border-radius: 12px;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      box-sizing: border-box;
+    }
+    textarea:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(0,157,145,0.15);
+    }
+    button {
+      background: linear-gradient(90deg, var(--teal), var(--blue));
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 15px;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(17,68,170,0.25);
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
+      margin-top: 10px;
+    }
+    button:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(17,68,170,0.28); }
+    button:active { transform: translateY(0); box-shadow: 0 6px 16px rgba(17,68,170,0.2); }
+    .answer {
+      background: linear-gradient(120deg, rgba(0,157,145,0.1), rgba(255,167,0,0.12));
+      border: 1px solid rgba(0,157,145,0.25);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-top: 16px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .para-list { margin-top: 18px; display: grid; gap: 12px; }
+    .para {
+      border: 1px solid rgba(17,68,170,0.15);
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: #fdfefe;
+    }
+    .score { color: var(--blue); font-size: 0.9em; margin-bottom: 6px; }
+    a { color: var(--amber); text-decoration: none; }
+    a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-  <h2>RAG Search</h2>
-  <form method="post">
-    <textarea name="q" placeholder="Ask a question...">{{ q }}</textarea><br/>
-    <button type="submit">Search</button>
-  </form>
-  {% if answer %}
-    <h3>Answer</h3>
-    <div>{{ answer }}</div>
-    <h3>Used paragraphs</h3>
-    {% for r in rows %}
-      <div class="para">
-        <div class="score">score: {{ "%.4f"|format(r.score) }} | {{ r.title }} | <a href="{{ r.url }}" target="_blank">link</a></div>
-        <div>{{ r.paragraph }}</div>
+  <div class="shell">
+    <h2>Wiki Search</h2>
+    <form method="post">
+      <textarea name="q" placeholder="Ask a question...">{{ q }}</textarea><br/>
+      <button type="submit">Search</button>
+    </form>
+    {% if answer %}
+      <div class="answer"><strong>Answer</strong><br/>{{ answer }}</div>
+      <h3>Used paragraphs</h3>
+      <div class="para-list">
+      {% for r in rows %}
+        <div class="para">
+          <div class="score">score: {{ "%.4f"|format(r.score) }} | {{ r.title }} | <a href="{{ r.url }}" target="_blank">link</a></div>
+          <div>{{ r.paragraph }}</div>
+        </div>
+      {% endfor %}
       </div>
-    {% endfor %}
-  {% endif %}
+    {% endif %}
+  </div>
 </body>
 </html>
