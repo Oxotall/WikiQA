@@ -1,4 +1,4 @@
-# wikiQA
+# WikiQA
 
 RAG prototype over Wikipedia paragraphs with:
 - Wiki paragraph embedding + HNSW index build
