@@ -15,13 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping
 
-import hnswlib
-import json
-import numpy as np
 from flask import Flask, render_template, request
-from sentence_transformers import SentenceTransformer
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
+from src.retrieval.hnsw_index import HnswIndex
 from src.retrieval.tools import load_yaml, read_access_token
 
 
@@ -55,40 +52,11 @@ class ServiceConfig:
 
 class RagIndex:
     def __init__(self, cfg: ServiceConfig, access_token: str | None):
-        self.index_dir = cfg.index_dir
-        manifest_path = self.index_dir / "manifest.json"
-        self.manifest = json.loads(manifest_path.read_text())
-
-        meta_path = self.index_dir / self.manifest["metadata_file"]
-        para_path = self.index_dir / self.manifest["paragraphs_file"]
-        index_path = self.index_dir / self.manifest["hnsw_index_file"]
-
-        self.encoder = SentenceTransformer(
-            cfg.encoder_model or self.manifest["model"], use_auth_token=access_token or None
-        )
-
-        self.index = hnswlib.Index(space=self.manifest["metric"], dim=self.manifest["dim"])
-        self.index.load_index(str(index_path))
-        self.index.set_ef(self.manifest.get("ef_search", 64))
-
-        self.metadata = [json.loads(line) for line in meta_path.read_text().splitlines() if line.strip()]
-        self.paragraphs = [json.loads(line)["text"] for line in para_path.read_text().splitlines() if line.strip()]
+        manifest_path = cfg.index_dir / "manifest.json"
+        self.hnsw_index = HnswIndex.load_from_disk(manifest_path)
 
     def search(self, query: str, k: int) -> List[Dict[str, Any]]:
-        vec = self.encoder.encode_query([query], convert_to_numpy=True, normalize_embeddings=False)[0]
-        labels, distances = self.index.knn_query(vec, k=k)
-        rows = []
-        for idx, dist in zip(labels[0], distances[0]):
-            meta = self.metadata[idx]
-            rows.append(
-                {
-                    "score": 1 - dist,
-                    "title": meta.get("title", ""),
-                    "url": meta.get("url", ""),
-                    "paragraph": self.paragraphs[idx],
-                }
-            )
-        return rows
+        return self.hnsw_index.search_by_text(query, k=k)
 
 
 class AnswerGenerator:
