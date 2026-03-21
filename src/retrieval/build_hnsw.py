@@ -1,5 +1,5 @@
 """
-Build an HNSW index over paragraph embeddings in a class-oriented, config-driven way.
+Build an HNSW index over paragraph embeddings
 
 Usage:
     python src/retrieval/build_hnsw.py --config configs/build_hnsw.yaml
@@ -29,14 +29,15 @@ from tools import load_yaml, read_access_token
 # ---------------------- Config ----------------------
 
 @dataclass
-class BuildConfig:
+class BuilderConfig:
     dataset_path: str
     dataset_name: str | None
     split: str
     output_dir: Path
+    min_paragraph_size: int
     model: str
     batch_size: int
-    max_elements: int | None
+    initial_index_size: int | None
     ef_construction: int
     m: int
     ef_search: int
@@ -45,16 +46,17 @@ class BuildConfig:
     access_config: str | None = "configs/access.yaml"
 
     @classmethod
-    def from_file(cls, path: Path) -> "BuildConfig":
+    def from_file(cls, path: Path) -> "BuilderConfig":
         raw = load_yaml(path)
         required = [
             "dataset_path",
             "dataset_name",
             "split",
             "output_dir",
+            "min_paragraph_size",
             "model",
             "batch_size",
-            "max_elements",
+            "initial_index_size",
             "ef_construction",
             "m",
             "ef_search",
@@ -69,9 +71,10 @@ class BuildConfig:
             dataset_name=raw.get("dataset_name"),
             split=raw["split"],
             output_dir=Path(raw["output_dir"]),
+            min_paragraph_size=raw.get("min_paragraph_size"),
             model=raw["model"],
             batch_size=int(raw["batch_size"]),
-            max_elements=raw.get("max_elements"),
+            initial_index_size=raw.get("initial_index_size"),
             ef_construction=int(raw["ef_construction"]),
             m=int(raw["m"]),
             ef_search=int(raw["ef_search"]),
@@ -83,20 +86,16 @@ class BuildConfig:
 
 # ---------------------- Builder ----------------------
 
-class HnswBuilder:
-    def __init__(self, cfg: BuildConfig) -> None:
+class HnswIndexBuilder:
+    def __init__(self, cfg: BuilderConfig) -> None:
         self.cfg = cfg
         self.out_dir = cfg.output_dir
         self.meta_path = self.out_dir / cfg.metadata_filename
         self.index_path = self.out_dir / "index.bin"
         self.manifest_path = self.out_dir / "manifest.json"
         self.paragraphs_path = self.out_dir / "paragraphs.jsonl"
-        self.embeddings_path = self.out_dir / "embeddings.dat"
 
         self.access_token = read_access_token(cfg.access_config)
-        if self.access_token:
-            logging.info("Using access token from %s", cfg.access_config)
-
         self.model = SentenceTransformer(
             cfg.model,
             use_auth_token=self.access_token or None,
@@ -104,58 +103,30 @@ class HnswBuilder:
             device="cpu",
         )
         self.dim = self.model.get_sentence_embedding_dimension()
-        logging.info("Loaded encoder '%s' with dim=%d", cfg.model, self.dim)
 
         self.dataset = load_dataset(cfg.dataset_path, cfg.dataset_name, split=cfg.split)
-        logging.info(
-            "Loaded dataset '%s' (name=%s, split=%s) rows=%d",
-            cfg.dataset_path,
-            cfg.dataset_name,
-            cfg.split,
-            len(self.dataset),
-        )
 
-        self.total_paragraphs = self._count_paragraphs()
-        self.max_elements = cfg.max_elements or self.total_paragraphs
-
+        self.max_elements = cfg.initial_index_size
         self.index = hnswlib.Index(space="ip", dim=self.dim)
         self.index.init_index(
             max_elements=self.max_elements, ef_construction=cfg.ef_construction, M=cfg.m
         )
         self.index.set_ef(cfg.ef_search)
         self.index.set_num_threads(cfg.num_threads)
-        logging.info(
-            "Initialized HNSW (ip): M=%d ef_construction=%d ef_search=%d max_elements=%d",
-            cfg.m,
-            cfg.ef_construction,
-            cfg.ef_search,
-            self.max_elements,
-        )
 
-        self.embeddings_mm = np.memmap(
-            self.embeddings_path, dtype="float32", mode="w+", shape=(self.max_elements, self.dim)
-        )
-
-    def _count_paragraphs(self) -> int:
-        logging.info("Counting paragraphs...")
-        total = 0
-        for row in tqdm(self.dataset, desc="Count paragraphs", unit="article"):
-            total += len(self._split_paragraphs(row["text"]))
-        logging.info("Total paragraphs: %d", total)
-        return total
+        self._log_init_summary(cfg)
 
     def _split_paragraphs(self, text: str) -> List[str]:
         """Split raw article text into paragraphs, keeping only non-empty parts."""
-        parts = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+        parts = [p.strip() for p in re.split(r"\n{2,}", text) if len(p.strip()) > self.cfg.min_paragraph_size]
         return parts or ([text.strip()] if text.strip() else [])
 
     def build(self) -> None:
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        next_id = 0
-        written_meta = 0
+        next_paragraph_idx = 0
 
         with self.meta_path.open("w", encoding="utf-8") as meta_file, \
-                self.paragraphs_path.open("w", encoding="utf-8") as para_file:
+                self.paragraphs_path.open("w", encoding="utf-8") as paragraph_file:
 
             text_batch: List[str] = []
             meta_batch: List[dict] = []
@@ -164,47 +135,38 @@ class HnswBuilder:
                 if article_idx > 100:
                     break
                 paragraphs = self._split_paragraphs(row["text"])
-                for para_idx, para in enumerate(paragraphs):
-                    text_batch.append(para)
+                for paragraph_idx, paragraph in enumerate(paragraphs):
+                    text_batch.append(paragraph)
                     meta_batch.append(
                         {
                             "row_id": row.get("id", ""),
                             "url": row.get("url", ""),
                             "title": row.get("title", ""),
-                            "paragraph_index": para_idx,
+                            "paragraph_index": paragraph_idx,
                         }
                     )
 
                     if len(text_batch) >= self.cfg.batch_size:
-                        next_id = self._encode_batch(text_batch, meta_batch, meta_file, para_file, next_id)
-                        written_meta += len(meta_batch)
+                        next_paragraph_idx = self._encode_batch(text_batch, meta_batch, meta_file, 
+                                                                paragraph_file, next_paragraph_idx)
                         text_batch.clear()
                         meta_batch.clear()
 
             if text_batch:
-                next_id = self._encode_batch(text_batch, meta_batch, meta_file, para_file, next_id)
-                written_meta += len(meta_batch)
-
-        self.embeddings_mm.flush()
-        nan_rows = int(np.isnan(self.embeddings_mm).any(axis=1).sum())
-        if nan_rows:
-            logging.warning("Found %d vectors containing NaNs in embeddings memmap", nan_rows)
-        else:
-            logging.info("No NaNs detected in stored embeddings")
+                next_paragraph_idx = self._encode_batch(text_batch, meta_batch, meta_file, 
+                                                        paragraph_file, next_paragraph_idx)
 
         self.index.save_index(str(self.index_path))
-        self._write_manifest(vectors=next_id)
+        self._write_manifest(vector_count=next_paragraph_idx)
 
-        logging.info("Indexed %d paragraphs; metadata rows written: %d", next_id, written_meta)
-        logging.info("Index saved to %s", self.index_path)
-        logging.info("Metadata saved to %s", self.meta_path)
+        self._log_build_summary(next_paragraph_idx)
 
     def _encode_batch(
         self,
         text_batch: Sequence[str],
         meta_batch: Sequence[dict],
         meta_file,
-        para_file,
+        paragraph_file,
         start_id: int,
     ) -> int:
         embeddings = self.model.encode_document(
@@ -215,23 +177,22 @@ class HnswBuilder:
             normalize_embeddings=False,
         )
 
-        needed = start_id + len(embeddings)
-        if needed > self.index.get_max_elements():
-            new_cap = int(math.ceil(needed * 1.2))
-            self.index.resize_index(new_cap)
-            logging.info("Resized index to %d elements", new_cap)
+        needed_index_capacity = start_id + len(embeddings)
+        if needed_index_capacity > self.index.get_max_elements():
+            new_index_capacity = int(math.ceil(needed_index_capacity * 1.2))
+            self.index.resize_index(new_index_capacity)
+            logging.info("Resized index to %d elements", new_index_capacity)
 
         ids = np.arange(start_id, start_id + len(embeddings))
         self.index.add_items(embeddings, ids)
 
-        for meta, para_text, emb_row, pid in zip(meta_batch, text_batch, embeddings, ids):
+        for meta, para_text, pid in zip(meta_batch, text_batch, ids):
             meta_file.write(json.dumps(meta, ensure_ascii=False) + "\n")
-            para_file.write(json.dumps({"pid": int(pid), "text": para_text}, ensure_ascii=False) + "\n")
-            self.embeddings_mm[int(pid)] = emb_row
+            paragraph_file.write(json.dumps({"pid": int(pid), "text": para_text}, ensure_ascii=False) + "\n")
 
         return start_id + len(embeddings)
 
-    def _write_manifest(self, vectors: int) -> None:
+    def _write_manifest(self, vector_count: int) -> None:
         manifest = {
             "dataset": self.cfg.dataset_path,
             "dataset_name": self.cfg.dataset_name,
@@ -244,12 +205,34 @@ class HnswBuilder:
             "M": self.cfg.m,
             "metadata_file": self.meta_path.name,
             "hnsw_index_file": self.index_path.name,
-            "embeddings_file": self.embeddings_path.name,
             "paragraphs_file": self.paragraphs_path.name,
-            "vectors": vectors,
-            "paragraphs": vectors,
+            "vector_count": vector_count
         }
         self.manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    
+    def _log_init_summary(self, cfg: BuilderConfig) -> None:
+        if self.access_token:
+            logging.info("Using access token from %s", cfg.access_config)
+        logging.info(
+            "Loaded dataset '%s' (name=%s, split=%s) rows=%d",
+            cfg.dataset_path,
+            cfg.dataset_name,
+            cfg.split,
+            len(self.dataset),
+        )
+        logging.info("Loaded encoder '%s' with dim=%d", cfg.model, self.dim)
+        logging.info(
+            "Initialized HNSW (ip): M=%d ef_construction=%d ef_search=%d max_elements=%d",
+            cfg.m,
+            cfg.ef_construction,
+            cfg.ef_search,
+            self.max_elements,
+        )
+
+    def _log_build_summary(self, vectors: int) -> None:
+        logging.info("Indexed %d paragraphs", vectors)
+        logging.info("Index saved to %s", self.index_path)
+        logging.info("Metadata saved to %s", self.meta_path)
 
 
 # ---------------------- CLI ----------------------
@@ -267,8 +250,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    cfg = BuildConfig.from_file(Path(args.config))
-    builder = HnswBuilder(cfg)
+    cfg = BuilderConfig.from_file(Path(args.config))
+    builder = HnswIndexBuilder(cfg)
     builder.build()
 
 
