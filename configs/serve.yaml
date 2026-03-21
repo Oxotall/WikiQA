@@ -2,6 +2,7 @@
 index_dir: data/index/wiki_hnsw   # directory containing manifest.json, index.bin, metadata.jsonl, paragraphs.jsonl, embeddings.dat
 encoder_model: google/embeddinggemma-300m
 qa_model: Qwen/Qwen2-1.5B-Instruct
+model_device: cpu
 k: 5
-max_new_tokens: 128
+max_new_tokens: 200
 access_config: configs/access.yaml  # optional; omit or set to null if not needed

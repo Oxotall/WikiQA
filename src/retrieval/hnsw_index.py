@@ -57,7 +57,11 @@ class HnswIndex:
         return hnsw_index
 
     @classmethod
-    def load_from_disk(cls, manifest_path: Path | str) -> "HnswIndex":
+    def load_from_disk(
+        cls,
+        manifest_path: Path | str,
+        model_device: str = "cpu"
+    ) -> "HnswIndex":
         manifest_path = Path(manifest_path)
         manifest = json.loads(manifest_path.read_text())
         base_dir = manifest_path.parent
@@ -69,7 +73,7 @@ class HnswIndex:
         index.load_index(str(index_path))
         index.set_ef(manifest.get("ef_search", 64))
 
-        model = SentenceTransformer(manifest.get("model", manifest["model"]))
+        model = SentenceTransformer(manifest["model"], device=model_device)
         sqlite_connection = cls._open_sqlite(sqlite_path)
 
         return cls(
@@ -117,11 +121,12 @@ class HnswIndex:
 
     @staticmethod
     def _load_model(cfg: Mapping[str, Any], access_token: str | None) -> tuple[SentenceTransformer, int]:
+        model_device = cfg.get("model_device", "cpu")
         model = SentenceTransformer(
             cfg["model"],
             use_auth_token=access_token or None,
             model_kwargs={"torch_dtype": torch.float32},
-            device="cpu",
+            device=model_device,
         )
         dim = model.get_sentence_embedding_dimension()
         return model, dim
@@ -177,7 +182,7 @@ class HnswIndex:
         index_path: Path,
         manifest_path: Path,
         sqlite_path: Path
-    ) -> int:
+    ) -> None:
         text_batch: List[str] = []
         meta_batch: List[dict] = []
 

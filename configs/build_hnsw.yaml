@@ -9,6 +9,7 @@ min_paragraph_size: 40
 
 # Embedding model
 model: google/embeddinggemma-300m
+model_device: cpu
 batch_size: 16
 
 # HNSW parameters

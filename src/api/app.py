@@ -31,6 +31,7 @@ class ServiceConfig:
     index_dir: Path
     encoder_model: str
     qa_model: str
+    model_device: str
     k: int
     max_new_tokens: int
     access_config: str | None
@@ -41,7 +42,8 @@ class ServiceConfig:
         return cls(
             index_dir=Path(cfg["index_dir"]),
             encoder_model=cfg.get("encoder_model"),
-            qa_model=cfg.get("qa_model", "Qwen/Qwen2-1.5B-Instruct"),
+            qa_model=cfg.get("qa_model"),
+            model_device=cfg.get("model_device"),
             k=int(cfg.get("k", 5)),
             max_new_tokens=int(cfg.get("max_new_tokens", 128)),
             access_config=cfg.get("access_config"),
@@ -53,17 +55,23 @@ class ServiceConfig:
 class RagIndex:
     def __init__(self, cfg: ServiceConfig, access_token: str | None):
         manifest_path = cfg.index_dir / "manifest.json"
-        self.hnsw_index = HnswIndex.load_from_disk(manifest_path)
+        self.hnsw_index = HnswIndex.load_from_disk(
+            manifest_path,
+            model_device=cfg.model_device,
+        )
 
     def search(self, query: str, k: int) -> List[Dict[str, Any]]:
         return self.hnsw_index.search_by_text(query, k=k)
 
 
 class AnswerGenerator:
-    def __init__(self, model_name: str, access_token: str | None):
+    def __init__(self, model_name: str, model_device: str, access_token: str | None):
         tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=access_token or None)
+        model_kwargs = {"torch_dtype": "auto", "device_map": model_device}
         model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype="auto", device_map="auto")
+            model_name,
+            **model_kwargs,
+        )
         self.pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
     def build_prompt(self, question: str, rows: List[Dict[str, Any]]) -> str:
@@ -88,7 +96,7 @@ def create_app(config_path: Path = DEFAULT_CONFIG) -> Flask:
     access_token = read_access_token(cfg.access_config)
 
     rag_index = RagIndex(cfg, access_token)
-    generator = AnswerGenerator(cfg.qa_model, access_token)
+    generator = AnswerGenerator(cfg.qa_model, cfg.model_device, access_token)
 
     app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 
