@@ -187,7 +187,7 @@ class HnswIndex:
         meta_batch: List[dict] = []
 
         for row_idx, row in enumerate(tqdm(dataset, desc="Articles", unit="article")):
-            if row_idx > 100:
+            if cfg["max_articles_to_process"] and row_idx > cfg["max_articles_to_process"]:
                 break
             paragraphs = self._split_paragraphs(row["text"], cfg["min_paragraph_size"])
             for paragraph_idx, paragraph in enumerate(paragraphs):
@@ -212,7 +212,7 @@ class HnswIndex:
         self._save_data_to_disk(index_path, manifest_path)
         self._log_build_summary(index_path, sqlite_path)
     
-    def _process_batch(self, text_batch: Sequence[str], meta_batch: Sequence[dict]) -> int:
+    def _process_batch(self, text_batch: Sequence[str], meta_batch: Sequence[dict]) -> None:
         embeddings = self.model.encode_document(
             list(text_batch),
             convert_to_numpy=True,

@@ -10,10 +10,9 @@ Run:
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List
 
 from flask import Flask, render_template, request
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
@@ -53,7 +52,7 @@ class ServiceConfig:
 # ------------------------- Components -------------------------
 
 class RAG:
-    def __init__(self, cfg: ServiceConfig, model_device: str, access_token: str | None):
+    def __init__(self, cfg: ServiceConfig, access_token: str | None):
         self.hnsw_index = HnswIndex.load_from_disk(cfg.index_dir / "manifest.json", cfg.model_device)
         self.number_of_candidates = cfg.k
         self.max_generated_tokens = cfg.max_generated_tokens
@@ -95,7 +94,7 @@ class AnswerGenerator:
 def create_app(config_path: Path = DEFAULT_CONFIG) -> Flask:
     cfg = ServiceConfig.from_file(config_path)
     access_token = read_access_token(cfg.access_config)
-    rag = RAG(cfg, cfg.model_device, access_token)
+    rag = RAG(cfg, access_token)
 
     app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 
