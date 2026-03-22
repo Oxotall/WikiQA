@@ -21,7 +21,7 @@ from tqdm.auto import tqdm
 
 try:
     from src.retrieval.tools import load_yaml, read_access_token
-except ImportError:  # script execution fallback
+except ImportError:
     from tools import load_yaml, read_access_token
 
 
@@ -71,7 +71,7 @@ class HnswIndex:
 
         index = hnswlib.Index(space=manifest["metric"], dim=manifest["dim"])
         index.load_index(str(index_path))
-        index.set_ef(manifest.get("ef_search", 64))
+        index.set_ef(manifest.get("ef_search"))
 
         model = SentenceTransformer(manifest["model"], device=model_device)
         sqlite_connection = cls._open_sqlite(sqlite_path)

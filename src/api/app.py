@@ -33,7 +33,7 @@ class ServiceConfig:
     qa_model: str
     model_device: str
     k: int
-    max_new_tokens: int
+    max_generated_tokens: int
     access_config: str | None
 
     @classmethod
@@ -44,35 +44,36 @@ class ServiceConfig:
             encoder_model=cfg.get("encoder_model"),
             qa_model=cfg.get("qa_model"),
             model_device=cfg.get("model_device"),
-            k=int(cfg.get("k", 5)),
-            max_new_tokens=int(cfg.get("max_new_tokens", 128)),
+            k=int(cfg.get("k")),
+            max_generated_tokens=int(cfg.get("max_generated_tokens")),
             access_config=cfg.get("access_config"),
         )
 
 
 # ------------------------- Components -------------------------
 
-class RagIndex:
-    def __init__(self, cfg: ServiceConfig, access_token: str | None):
-        manifest_path = cfg.index_dir / "manifest.json"
-        self.hnsw_index = HnswIndex.load_from_disk(
-            manifest_path,
-            model_device=cfg.model_device,
-        )
-
-    def search(self, query: str, k: int) -> List[Dict[str, Any]]:
-        return self.hnsw_index.search_by_text(query, k=k)
+class RAG:
+    def __init__(self, cfg: ServiceConfig, model_device: str, access_token: str | None):
+        self.hnsw_index = HnswIndex.load_from_disk(cfg.index_dir / "manifest.json", cfg.model_device)
+        self.number_of_candidates = cfg.k
+        self.max_generated_tokens = cfg.max_generated_tokens
+        self.text_generator = AnswerGenerator(cfg.qa_model, cfg.model_device, access_token)
+    
+    def create_answer(self, query: str) -> tuple[List[Dict[str, Any]], str]:
+        candidates = self.hnsw_index.search_by_text(query, k=self.number_of_candidates)
+        answer = self.text_generator.generate(query, candidates, max_generated_tokens=self.max_generated_tokens)
+        return candidates, answer
 
 
 class AnswerGenerator:
-    def __init__(self, model_name: str, model_device: str, access_token: str | None):
-        tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=access_token or None)
+    def __init__(self, qa_model:str, model_device: str, access_token: str | None):
+        tokenizer = AutoTokenizer.from_pretrained(qa_model, use_auth_token=access_token or None)
         model_kwargs = {"torch_dtype": "auto", "device_map": model_device}
         model = AutoModelForCausalLM.from_pretrained(
-            model_name,
+            qa_model,
             **model_kwargs,
         )
-        self.pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
+        self.text_generation_pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
     def build_prompt(self, question: str, rows: List[Dict[str, Any]]) -> str:
         context = "\n\n".join(
@@ -83,9 +84,9 @@ class AnswerGenerator:
             f"Context:\n{context}\n\nQuestion: {question}\nAnswer:"
         )
 
-    def generate(self, question: str, rows: List[Dict[str, Any]], max_new_tokens: int) -> str:
+    def generate(self, question: str, rows: List[Dict[str, Any]], max_generated_tokens: int) -> str:
         prompt = self.build_prompt(question, rows)
-        out = self.pipe(prompt, max_new_tokens=max_new_tokens, do_sample=False)
+        out = self.text_generation_pipe(prompt, max_new_tokens=max_generated_tokens, do_sample=False)
         return out[0]["generated_text"].split("Answer:", 1)[-1].strip()
 
 
@@ -94,23 +95,21 @@ class AnswerGenerator:
 def create_app(config_path: Path = DEFAULT_CONFIG) -> Flask:
     cfg = ServiceConfig.from_file(config_path)
     access_token = read_access_token(cfg.access_config)
-
-    rag_index = RagIndex(cfg, access_token)
-    generator = AnswerGenerator(cfg.qa_model, cfg.model_device, access_token)
+    rag = RAG(cfg, cfg.model_device, access_token)
 
     app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 
     @app.route("/", methods=["GET", "POST"])
     def home():
-        q = ""
+        query = ""
         answer = None
+        candidates = list()
         rows: List[Dict[str, Any]] = []
         if request.method == "POST":
-            q = request.form.get("q", "").strip()
-            if q:
-                rows = rag_index.search(q, k=cfg.k)
-                answer = generator.generate(q, rows, max_new_tokens=cfg.max_new_tokens)
-        return render_template("index.html", q=q, answer=answer, rows=rows)
+            query = request.form.get("q", "").strip()
+            if query:
+                candidates, answer = rag.create_answer(query)
+        return render_template("index.html", q=query, answer=answer, rows=candidates)
 
     return app
 

@@ -4,5 +4,5 @@ encoder_model: google/embeddinggemma-300m
 qa_model: Qwen/Qwen2-1.5B-Instruct
 model_device: cpu
 k: 5
-max_new_tokens: 200
+max_generated_tokens: 200
 access_config: configs/access.yaml  # optional; omit or set to null if not needed
