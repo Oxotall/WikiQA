@@ -189,7 +189,8 @@ class HnswIndex:
         for row_idx, row in enumerate(tqdm(dataset, desc="Articles", unit="article")):
             if cfg["max_articles_to_process"] and row_idx > cfg["max_articles_to_process"]:
                 break
-            paragraphs = self._split_paragraphs(row["text"], cfg["min_paragraph_size"])
+            paragraphs = self._split_paragraphs(row["text"], cfg["min_paragraph_size"], 
+                                                cfg.get["max_paragraph_size"])
             for paragraph_idx, paragraph in enumerate(paragraphs):
                 text_batch.append(paragraph)
                 meta_batch.append(
@@ -249,9 +250,23 @@ class HnswIndex:
         self.manifest['vector_count'] += len(embeddings)
     
     @staticmethod
-    def _split_paragraphs(text: str, min_paragraph_size: int) -> List[str]:
-        parts = [p.strip() for p in re.split(r"\n{2,}", text) if len(p.strip()) > min_paragraph_size]
-        return parts or ([text.strip()] if text.strip() else [])
+    def _split_paragraphs(
+        text: str,
+        min_paragraph_size: int,
+        max_paragraph_size: int | None = None,
+    ) -> List[str]:
+        split_parts: List[str] = []
+        for paragraph in re.split(r"\n{2,}", text):
+            if len (paragraph) < min_paragraph_size:
+                continue
+            if len(paragraph) <= max_paragraph_size:
+                split_parts.append(paragraph)
+                continue
+            split_parts.extend(
+                paragraph[i : i + max_paragraph_size]
+                for i in range(0, len(paragraph), max_paragraph_size)
+            )
+        return split_parts
 
     def _save_data_to_disk(self, index_path, manifest_path) -> None:
         self.sqlite_connection.commit()

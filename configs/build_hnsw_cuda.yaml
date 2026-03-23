@@ -11,8 +11,8 @@ max_articles_to_process: null
 
 # Embedding model
 model: google/embeddinggemma-300m
-model_device: cpu
-batch_size: 16
+model_device: cuda
+batch_size: 64
 
 # HNSW parameters
 initial_index_size: 100000
