@@ -190,7 +190,7 @@ class HnswIndex:
             if cfg["max_articles_to_process"] and row_idx > cfg["max_articles_to_process"]:
                 break
             paragraphs = self._split_paragraphs(row["text"], cfg["min_paragraph_size"], 
-                                                cfg.get["max_paragraph_size"])
+                                                cfg["max_paragraph_size"])
             for paragraph_idx, paragraph in enumerate(paragraphs):
                 text_batch.append(paragraph)
                 meta_batch.append(
