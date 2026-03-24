@@ -14,6 +14,7 @@ model: google/embeddinggemma-300m
 model_device: cuda
 multiprocessing: true
 batch_size: 128
+access_config: configs/access.yaml
 
 # HNSW parameters
 initial_index_size: 100000
@@ -22,5 +23,3 @@ m: 16
 ef_search: 64
 num_threads: 8
 
-# Metadata output
-metadata_filename: metadata.jsonl

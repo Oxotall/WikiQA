@@ -3,7 +3,7 @@
 # Data
 dataset_path: omarkamali/wikipedia-monthly
 dataset_name: latest.en             # local HF dataset directory or hub ID
-split: train
+split: 1000                         # small dataset for testing on cpu
 output_dir: data/index/wiki_hnsw    # where index.bin, metadata.jsonl, manifest.json are written
 min_paragraph_size: 40
 max_paragraph_size: 1200
@@ -14,6 +14,7 @@ model: google/embeddinggemma-300m
 model_device: cpu
 multiprocessing: false
 batch_size: 16
+access_config: configs/access.yaml
 
 # HNSW parameters
 initial_index_size: 100000
@@ -22,5 +23,3 @@ m: 16
 ef_search: 64
 num_threads: 8
 
-# Metadata output
-metadata_filename: metadata.jsonl

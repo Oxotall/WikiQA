@@ -42,19 +42,34 @@ class HnswIndex:
     @classmethod
     def build_from_config(cls, config_path: Path | str) -> "HnswIndex":
         cfg = load_yaml(Path(config_path))
-        access_token = cls._get_access_token(cfg)
-        out_path_dict = cls._prepare_output_paths(cfg)
-        model, dim = cls._load_model(cfg, access_token)
-        index = cls._init_index(cfg, dim)
+        access_token = cls._get_access_token(cfg["access_config"])
+        out_path_dict = cls._prepare_output_paths(cfg["output_dir"])
+        model, dim = cls._load_model(cfg["model"], cfg["model_device"], access_token)
+        index = cls._init_index(
+            initial_index_size=cfg["initial_index_size"],
+            ef_construction=cfg["ef_construction"],
+            m=cfg["m"],
+            ef_search=cfg["ef_search"],
+            num_threads=cfg["num_threads"],
+            dim=dim
+        )
         sqlite_connection = cls._open_sqlite(out_path_dict["sqlite_path"])
         cls._init_sqlite_schema(sqlite_connection)
         manifest = cls._create_manifest(cfg, dim, out_path_dict)
         hnsw_index = cls(manifest, index, sqlite_connection, model)
-        hnsw_index._init_multiprocessing_pool(cfg)
+        hnsw_index._init_multiprocessing_pool(bool(cfg["multiprocessing"]), cfg["model_device"])
 
-        dataset = cls._load_dataset(cfg)
-        hnsw_index._build_paragraph_index(cfg, dataset, out_path_dict["index_path"], 
-                                          out_path_dict["manifest_path"], out_path_dict["sqlite_path"])
+        dataset = cls._load_dataset(cfg["dataset_path"], cfg.get("dataset_name"), cfg["split"])
+        hnsw_index._build_paragraph_index(
+            dataset=dataset,
+            min_paragraph_size=cfg["min_paragraph_size"],
+            max_paragraph_size=cfg["max_paragraph_size"],
+            max_articles_to_process=cfg["max_articles_to_process"],
+            batch_size=cfg["batch_size"],
+            index_path=out_path_dict["index_path"],
+            manifest_path=out_path_dict["manifest_path"],
+            sqlite_path=out_path_dict["sqlite_path"]
+        )
         
         return hnsw_index
 
@@ -86,12 +101,12 @@ class HnswIndex:
         )
 
     @staticmethod
-    def _get_access_token(cfg: Mapping[str, Any]) -> str | None:
-        return read_access_token(cfg.get("access_config", "configs/access.yaml"))
+    def _get_access_token(access_config: str) -> str | None:
+        return read_access_token(access_config)
 
     @staticmethod
-    def _prepare_output_paths(cfg: Mapping[str, Any]) -> Dict[str, Path]:
-        out_dir = Path(cfg["output_dir"])
+    def _prepare_output_paths(output_dir: str) -> Dict[str, Path]:
+        out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         return {
             "out_dir": out_dir,
@@ -122,10 +137,13 @@ class HnswIndex:
         sqlite_connection.commit()
 
     @staticmethod
-    def _load_model(cfg: Mapping[str, Any], access_token: str | None) -> tuple[SentenceTransformer, int]:
-        model_device = cfg.get("model_device", "cpu")
+    def _load_model(
+        model_name: str,
+        model_device: str,
+        access_token: str | None,
+    ) -> tuple[SentenceTransformer, int]:
         model = SentenceTransformer(
-            cfg["model"],
+            model_name,
             use_auth_token=access_token or None,
             model_kwargs={"torch_dtype": torch.float32},
             device=model_device,
@@ -134,19 +152,19 @@ class HnswIndex:
         return model, dim
 
     @staticmethod
-    def _load_dataset(cfg: Mapping[str, Any]):
-        dataset = load_dataset(cfg["dataset_path"], cfg.get("dataset_name"), split=cfg["split"])
+    def _load_dataset(dataset_path: str, dataset_name: str | None, split: str):
+        dataset = load_dataset(dataset_path, dataset_name, split=split)
         logging.info(
             "Loaded dataset '%s' (name=%s, split=%s) rows=%d",
-            cfg["dataset_path"],
-            cfg.get("dataset_name"),
-            cfg["split"],
+            dataset_path,
+            dataset_name,
+            split,
             len(dataset),
         )
         return dataset
     
     @staticmethod
-    def _create_manifest(cfg: Mapping[str, Any], dim:int, path_dict: Mapping[str, Path]) -> Dict[str, Any]:
+    def _create_manifest(cfg: Mapping[str, Any], dim: int, path_dict: Mapping[str, Path]) -> Dict[str, Any]:
         manifest = {
             "dataset": cfg["dataset_path"],
             "dataset_name": cfg.get("dataset_name"),
@@ -164,35 +182,46 @@ class HnswIndex:
         return manifest
 
     @staticmethod
-    def _init_index(cfg: Mapping[str, Any], dim: int) -> hnswlib.Index:
-        max_elements = cfg.get("initial_index_size")
-
+    def _init_index(
+        initial_index_size: int | None,
+        ef_construction: int,
+        m: int,
+        ef_search: int,
+        num_threads: int,
+        dim: int,
+    ) -> hnswlib.Index:
         index = hnswlib.Index(space="ip", dim=dim)
         index.init_index(
-            max_elements=max_elements,
-            ef_construction=cfg["ef_construction"],
-            M=cfg["m"],
+            max_elements=initial_index_size,
+            ef_construction=ef_construction,
+            M=m,
         )
-        index.set_ef(cfg["ef_search"])
-        index.set_num_threads(cfg["num_threads"])
+        index.set_ef(ef_search)
+        index.set_num_threads(num_threads)
         return index
 
     def _build_paragraph_index(
         self,
-        cfg: Mapping[str, Any],
         dataset: Dataset,
+        min_paragraph_size: int,
+        max_paragraph_size: int | None,
+        max_articles_to_process: int | None,
+        batch_size: int,
         index_path: Path,
         manifest_path: Path,
-        sqlite_path: Path
+        sqlite_path: Path,
     ) -> None:
         text_batch: List[str] = []
         meta_batch: List[dict] = []
         try:
             for row_idx, row in enumerate(tqdm(dataset, desc="Articles", unit="article")):
-                if cfg["max_articles_to_process"] and row_idx > cfg["max_articles_to_process"]:
+                if max_articles_to_process and row_idx > max_articles_to_process:
                     break
-                paragraphs = self._split_paragraphs(row["text"], cfg["min_paragraph_size"], 
-                                                    cfg["max_paragraph_size"])
+                paragraphs = self._split_paragraphs(
+                    row["text"],
+                    min_paragraph_size,
+                    max_paragraph_size,
+                )
                 for paragraph_idx, paragraph in enumerate(paragraphs):
                     text_batch.append(paragraph)
                     meta_batch.append(
@@ -204,7 +233,7 @@ class HnswIndex:
                         }
                     )
 
-                    if len(text_batch) >= cfg["batch_size"]:
+                    if len(text_batch) >= batch_size:
                         self._process_batch(text_batch, meta_batch)
                         text_batch.clear()
                         meta_batch.clear()
@@ -289,9 +318,9 @@ class HnswIndex:
             return []
         return [f"cuda:{i}" for i in range(torch.cuda.device_count())]
 
-    def _init_multiprocessing_pool(self, cfg: Mapping[str, Any]) -> None:
-        model_device = str(cfg["model_device"]).lower()
-        if not (cfg.get("multiprocessing") and model_device.startswith("cuda")):
+    def _init_multiprocessing_pool(self, multiprocessing_enabled: bool, model_device: str) -> None:
+        device_name = str(model_device).lower()
+        if not (multiprocessing_enabled and device_name.startswith("cuda")):
             return
 
         devices = self._get_available_cuda_devices()
@@ -299,7 +328,7 @@ class HnswIndex:
             logging.warning(
                 "multiprocessing=true and model_device=%s, but no CUDA devices were found. "
                 "Falling back to single-process encoding.",
-                cfg.get("model_device"),
+                model_device,
             )
             return
 
