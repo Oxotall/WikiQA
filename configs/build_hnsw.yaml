@@ -7,11 +7,12 @@ split: train
 output_dir: data/index/wiki_hnsw    # where index.bin, metadata.jsonl, manifest.json are written
 min_paragraph_size: 40
 max_paragraph_size: 1200
-max_articles_to_process: null
+max_articles_to_process: 100
 
 # Embedding model
 model: google/embeddinggemma-300m
 model_device: cpu
+multiprocessing: false
 batch_size: 16
 
 # HNSW parameters

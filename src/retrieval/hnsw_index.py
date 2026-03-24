@@ -37,6 +37,7 @@ class HnswIndex:
         self.index = index
         self.sqlite_connection = sqlite_connection
         self.model = model
+        self.pool = None
 
     @classmethod
     def build_from_config(cls, config_path: Path | str) -> "HnswIndex":
@@ -49,6 +50,7 @@ class HnswIndex:
         cls._init_sqlite_schema(sqlite_connection)
         manifest = cls._create_manifest(cfg, dim, out_path_dict)
         hnsw_index = cls(manifest, index, sqlite_connection, model)
+        hnsw_index._init_multiprocessing_pool(cfg)
 
         dataset = cls._load_dataset(cfg)
         hnsw_index._build_paragraph_index(cfg, dataset, out_path_dict["index_path"], 
@@ -185,37 +187,40 @@ class HnswIndex:
     ) -> None:
         text_batch: List[str] = []
         meta_batch: List[dict] = []
+        try:
+            for row_idx, row in enumerate(tqdm(dataset, desc="Articles", unit="article")):
+                if cfg["max_articles_to_process"] and row_idx > cfg["max_articles_to_process"]:
+                    break
+                paragraphs = self._split_paragraphs(row["text"], cfg["min_paragraph_size"], 
+                                                    cfg["max_paragraph_size"])
+                for paragraph_idx, paragraph in enumerate(paragraphs):
+                    text_batch.append(paragraph)
+                    meta_batch.append(
+                        {
+                            "row_id": row.get("id", ""),
+                            "url": row.get("url", ""),
+                            "title": row.get("title", ""),
+                            "paragraph_index": paragraph_idx,
+                        }
+                    )
 
-        for row_idx, row in enumerate(tqdm(dataset, desc="Articles", unit="article")):
-            if cfg["max_articles_to_process"] and row_idx > cfg["max_articles_to_process"]:
-                break
-            paragraphs = self._split_paragraphs(row["text"], cfg["min_paragraph_size"], 
-                                                cfg["max_paragraph_size"])
-            for paragraph_idx, paragraph in enumerate(paragraphs):
-                text_batch.append(paragraph)
-                meta_batch.append(
-                    {
-                        "row_id": row.get("id", ""),
-                        "url": row.get("url", ""),
-                        "title": row.get("title", ""),
-                        "paragraph_index": paragraph_idx,
-                    }
-                )
+                    if len(text_batch) >= cfg["batch_size"]:
+                        self._process_batch(text_batch, meta_batch)
+                        text_batch.clear()
+                        meta_batch.clear()
 
-                if len(text_batch) >= cfg["batch_size"]:
-                    self._process_batch(text_batch, meta_batch)
-                    text_batch.clear()
-                    meta_batch.clear()
-
-        if text_batch:
-            self._process_batch(text_batch, meta_batch)
-        
-        self._save_data_to_disk(index_path, manifest_path)
-        self._log_build_summary(index_path, sqlite_path)
+            if text_batch:
+                self._process_batch(text_batch, meta_batch)
+            
+            self._save_data_to_disk(index_path, manifest_path)
+            self._log_build_summary(index_path, sqlite_path)
+        finally:
+            self._close_multiprocessing_pool()
     
     def _process_batch(self, text_batch: Sequence[str], meta_batch: Sequence[dict]) -> None:
         embeddings = self.model.encode_document(
             list(text_batch),
+            pool=self.pool,
             convert_to_numpy=True,
             batch_size=len(text_batch),
             show_progress_bar=False,
@@ -277,6 +282,34 @@ class HnswIndex:
         logging.info("Indexed %d paragraphs", self.manifest['vector_count'])
         logging.info("Index saved to %s", index_path)
         logging.info("SQLite saved to %s", sqlite_path)
+
+    @staticmethod
+    def _get_available_cuda_devices() -> List[str]:
+        if not torch.cuda.is_available():
+            return []
+        return [f"cuda:{i}" for i in range(torch.cuda.device_count())]
+
+    def _init_multiprocessing_pool(self, cfg: Mapping[str, Any]) -> None:
+        model_device = str(cfg["model_device"]).lower()
+        if not (cfg.get("multiprocessing") and model_device.startswith("cuda")):
+            return
+
+        devices = self._get_available_cuda_devices()
+        if not devices:
+            logging.warning(
+                "multiprocessing=true and model_device=%s, but no CUDA devices were found. "
+                "Falling back to single-process encoding.",
+                cfg.get("model_device"),
+            )
+            return
+
+        self.pool = self.model.start_multi_process_pool(target_devices=devices)
+        logging.info("Started multi-process encoding pool on devices: %s", devices)
+
+    def _close_multiprocessing_pool(self) -> None:
+        if self.pool is not None:
+            self.model.stop_multi_process_pool(self.pool)
+            self.pool = None
 
 # -------------------------- Search -------------------------- 
 
