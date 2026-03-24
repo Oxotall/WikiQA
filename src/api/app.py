@@ -52,11 +52,19 @@ class ServiceConfig:
 # ------------------------- Components -------------------------
 
 class RAG:
-    def __init__(self, cfg: ServiceConfig, access_token: str | None):
-        self.hnsw_index = HnswIndex.load_from_disk(cfg.index_dir / "manifest.json", cfg.model_device)
-        self.number_of_candidates = cfg.k
-        self.max_generated_tokens = cfg.max_generated_tokens
-        self.text_generator = AnswerGenerator(cfg.qa_model, cfg.model_device, access_token)
+    def __init__(
+        self,
+        index_dir: Path,
+        qa_model: str,
+        model_device: str,
+        number_of_candidates: int,
+        max_generated_tokens: int,
+        access_token: str | None,
+    ):
+        self.hnsw_index = HnswIndex.load_from_disk(index_dir / "manifest.json", model_device)
+        self.number_of_candidates = number_of_candidates
+        self.max_generated_tokens = max_generated_tokens
+        self.text_generator = AnswerGenerator(qa_model, model_device, access_token)
     
     def create_answer(self, query: str) -> tuple[List[Dict[str, Any]], str]:
         candidates = self.hnsw_index.search_by_text(query, k=self.number_of_candidates)
@@ -94,7 +102,14 @@ class AnswerGenerator:
 def create_app(config_path: Path = DEFAULT_CONFIG) -> Flask:
     cfg = ServiceConfig.from_file(config_path)
     access_token = read_access_token(cfg.access_config)
-    rag = RAG(cfg, access_token)
+    rag = RAG(
+        index_dir=cfg.index_dir,
+        qa_model=cfg.qa_model,
+        model_device=cfg.model_device,
+        number_of_candidates=cfg.k,
+        max_generated_tokens=cfg.max_generated_tokens,
+        access_token=access_token,
+    )
 
     app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
 
