@@ -47,6 +47,7 @@ class HnswIndex:
         model, dim = cls._load_model(cfg["model"], cfg["model_device"], access_token)
         index = cls._init_index(
             initial_index_size=cfg["initial_index_size"],
+            space=cfg["space"],
             ef_construction=cfg["ef_construction"],
             m=cfg["m"],
             ef_search=cfg["ef_search"],
@@ -171,7 +172,7 @@ class HnswIndex:
             "split": cfg["split"],
             "model": cfg["model"],
             "dim": dim,
-            "metric": "ip",
+            "metric": cfg["space"],
             "ef_search": cfg["ef_search"],
             "ef_construction": cfg["ef_construction"],
             "M": cfg["m"],
@@ -184,13 +185,14 @@ class HnswIndex:
     @staticmethod
     def _init_index(
         initial_index_size: int | None,
+        space: str,
         ef_construction: int,
         m: int,
         ef_search: int,
         num_threads: int,
         dim: int,
     ) -> hnswlib.Index:
-        index = hnswlib.Index(space="ip", dim=dim)
+        index = hnswlib.Index(space=space, dim=dim)
         index.init_index(
             max_elements=initial_index_size,
             ef_construction=ef_construction,
