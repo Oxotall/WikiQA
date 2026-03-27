@@ -1,8 +1,8 @@
 """
 Flask RAG service backed by the prebuilt HNSW index.
 
-- Loads search/generation parameters from configs/serve.yaml
-- Serves a single-page UI that shows the answer and supporting paragraphs.
+- Loads search/generation parameters from configs/service.yaml
+- Service with a single-page UI that shows the answer and supporting paragraphs.
 
 Run:
     FLASK_APP=src/api/app.py flask run --host 0.0.0.0 --port 8000
@@ -22,7 +22,7 @@ from src.retrieval.tools import load_yaml, read_access_token
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_CONFIG = Path("configs/serve.yaml")
+DEFAULT_CONFIG = Path("configs/service.yaml")
 
 
 @dataclass
