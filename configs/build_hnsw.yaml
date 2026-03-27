@@ -18,7 +18,7 @@ access_config: configs/access.yaml
 
 # HNSW parameters
 initial_index_size: 100000
-space: ip
+space: cosine
 ef_construction: 200
 m: 16
 ef_search: 64
