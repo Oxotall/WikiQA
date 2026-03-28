@@ -249,6 +249,11 @@ class HnswIndex:
             self._close_multiprocessing_pool()
     
     def _process_batch(self, text_batch: Sequence[str], meta_batch: Sequence[dict]) -> None:
+        ids = self._encode_and_add_to_hnsw(text_batch)
+        self._write_batch_to_sqlite(meta_batch, text_batch, ids)
+        self.manifest['vector_count'] += len(ids)
+
+    def _encode_and_add_to_hnsw(self, text_batch: Sequence[str]) -> np.ndarray:
         embeddings = self.model.encode_document(
             list(text_batch),
             pool=self.pool,
@@ -266,7 +271,14 @@ class HnswIndex:
 
         ids = np.arange(self.manifest['vector_count'], self.manifest['vector_count'] + len(embeddings))
         self.index.add_items(embeddings, ids)
+        return ids
 
+    def _write_batch_to_sqlite(
+        self,
+        meta_batch: Sequence[dict],
+        text_batch: Sequence[str],
+        ids: Sequence[int],
+    ) -> None:
         for meta, paragraph_text, pid in zip(meta_batch, text_batch, ids):
             self.sqlite_connection.execute(
                 """
@@ -282,8 +294,6 @@ class HnswIndex:
                     paragraph_text,
                 ),
             )
-
-        self.manifest['vector_count'] += len(embeddings)
     
     @staticmethod
     def _split_paragraphs(
